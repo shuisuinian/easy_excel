@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 authors = ["shuisuinian"]
 description = "easy read and write excel"
-license = "MIT License"
+license = "MIT"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
