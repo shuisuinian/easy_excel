@@ -11,3 +11,4 @@ license = "MIT"
 [dependencies]
 quote = { version = "1.0.21", features = ["proc-macro"] }
 syn = "1.0.103"
+umya-spreadsheet = "0.8.3"
