@@ -7,8 +7,14 @@ description = "easy read and write excel"
 license = "MIT"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[lib]
+proc-macro = true
 
 [dependencies]
+#proc_macro_roids
+darling = "0.14.2"
+proc-macro2 = "1.0.47"
 quote = { version = "1.0.21", features = ["proc-macro"] }
-syn = "1.0.103"
+#serde = { version = "1.0.147", features = ["derive"] }
+syn = { version = "1.0.103", features = ["extra-traits"] }
 umya-spreadsheet = "0.8.3"
