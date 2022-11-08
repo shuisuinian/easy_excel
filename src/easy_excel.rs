@@ -32,6 +32,9 @@ pub mod macros {
     }
 }
 
+/// 常量
+const DEFAULT_ORDER: u32 = 99;
+const DEFAULT_WIDTH: u32 = 0;
 /// 用于捕获每个字段的 attributes 的结构
 #[derive(Debug, Default, FromField)]
 #[darling(default, attributes(excel))]
@@ -113,7 +116,11 @@ impl EasyExcelContext {
                     let title = format_title_with_dashed(title.clone(), &fd.name);
                     if fd.is_option {
                         man_insert_stream.extend(quote!(
-                            map.insert(#title.to_string(),temp.#fd_name.clone().unwrap().to_string());
+                            let value = match temp.#fd_name.clone() {
+                                Some(value) => value.to_string(),
+                                None => "".to_string(),
+                            };
+                            map.insert(#title.to_string(),value);
                         ));
                     } else {
                         man_insert_stream.extend(quote!(
@@ -211,7 +218,6 @@ impl EasyExcelContext {
         stream
     }
 
-    // const DEFAULT_ORDER: u32 = 99;
     fn generate_header_help_data(&self) -> TokenStream {
         let header_help_name = Ident::new(&format!("{}HeaderHelp", self.name), self.name.span());
         let mut header_struct_data_stream = TokenStream::new();
@@ -225,8 +231,8 @@ impl EasyExcelContext {
             }
             if let Some(title) = &fd.opts.title {
                 let title_key = format_title_with_dashed(title.clone(), &fd.name);
-                let order = fd.opts.order.unwrap_or(99);
-                let width = fd.opts.width.unwrap_or(0);
+                let order = fd.opts.order.unwrap_or(DEFAULT_ORDER);
+                let width = fd.opts.width.unwrap_or(DEFAULT_WIDTH);
                 header_struct_data_stream.extend(quote!(
                     header_help_list.push(
                         #header_help_name {
