@@ -37,7 +37,8 @@ pub mod macros {
 #[darling(default, attributes(excel))]
 struct Opts {
     title: Option<String>,
-    index: Option<u32>,
+    order: Option<u32>,
+    width: Option<u32>,
 }
 
 /// 我们需要的描述一个字段的所有信息
@@ -97,44 +98,72 @@ impl From<DeriveInput> for EasyExcelContext {
 
 impl EasyExcelContext {
     pub fn render(&self) -> syn::Result<TokenStream> {
-        println!("{:#?}", self);
+        // println!("{:#?}", self);
         let struct_name = &self.name;
-        let header = &self.generate_header();
-        let header_size = header.len();
-        let fds = &self.fields;
+        let header_help_struct = self.generate_header_help_struct();
+        let header_help_list_data = self.generate_header_help_data();
+
+        // let fds = &self.fields;
         // let fields = &self.fields;
-        let mut stream = TokenStream::new();
-        for fd in fds.iter() {
+        let mut man_insert_stream = TokenStream::new();
+        for fd in self.fields.iter() {
             if !fd.is_vec {
                 if let Some(title) = &fd.opts.title {
                     let fd_name = &fd.name;
-                    stream.extend(quote!(
-                        map.insert(#title.to_string(),temp.#fd_name.clone().to_string());
-                    ));
+                    let title = format_title_with_dashed(title.clone(), &fd.name);
+                    if fd.is_option {
+                        man_insert_stream.extend(quote!(
+                            map.insert(#title.to_string(),temp.#fd_name.clone().unwrap().to_string());
+                        ));
+                    } else {
+                        man_insert_stream.extend(quote!(
+                            map.insert(#title.to_string(),temp.#fd_name.clone().to_string());
+                        ));
+                    }
+                    // let tt = title.split('-').next().unwrap().to_string();
                 }
             }
         }
         let res = quote!(
+            #header_help_struct
+
             impl #struct_name {
                 fn write_excel(list: Vec<#struct_name>, path: &std::path::Path) {
                     use umya_spreadsheet as xl_tool;
                     use std::collections::HashMap;
                     let mut book = xl_tool::new_file_empty_worksheet();
                     let sheet = book.new_sheet("Sheet1").unwrap();
-                    let header = vec![
-                        #(#header,)*
-                    ];
-                    for col in 1..=#header_size {
+                    #header_help_list_data
+                    // println!("{}",header_help_list.len());
+                    for col in 1..=header_help_list.len() {
                         let cell = sheet.get_cell_by_column_and_row_mut(&(col as u32), &(1 as u32));
-                        cell.set_value_from_string(header[col - 1]);
+                        let title = &header_help_list[col - 1].title.clone().unwrap();
+                        // let title = header[col - 1].split('-').next().unwrap().to_string();
+                        cell.set_value_from_string(title);
                     }
                     for row in 2..=list.len()+1 {
                         let temp = &list[row - 2];
                         let mut map: HashMap<String,String> = HashMap::new();
-                        #stream
-                        for col in 1..=#header_size {
+                        #man_insert_stream
+                        for col in 1..=header_help_list.len() {
                             let cell = sheet.get_cell_by_column_and_row_mut(&(col as u32), &(row as u32));
-                            cell.set_value_from_string(map.get(header[col - 1]).unwrap());
+                            let title_key = &header_help_list[col - 1].title_key.clone().unwrap();
+                            if let Some(value) = map.get(title_key) {
+                                cell.set_value_from_string(value);
+                            }else{
+                                cell.set_value_from_string("".to_string());
+                            }
+                        }
+                    }
+
+                    // style width
+                    for col in 1..=header_help_list.len() {
+                        let column = sheet.get_column_dimension_by_number_mut(&(col as u32));
+                        let width = header_help_list[col - 1].width.unwrap();
+                        if width == 0 {
+                            column.set_auto_width(true);
+                        }else {
+                            column.set_width(width as f64);
                         }
                     }
                     let _ = xl_tool::writer::xlsx::write(&book, path);
@@ -146,15 +175,84 @@ impl EasyExcelContext {
 
     fn generate_header(&self) -> Vec<String> {
         // let mut header = Vec::new();
-        let header: Vec<_> = self
+        let mut header_fd: Vec<_> = self
             .fields
             .iter()
             .filter(|fd| !fd.is_vec)
-            .filter_map(|fd| fd.opts.title.clone())
+            .filter(|fd| fd.opts.title.is_some())
+            .collect();
+
+        let default_order = 99u32;
+        header_fd.sort_by(|o1, o2| {
+            let o1_order = o1.opts.order.unwrap_or(default_order);
+            let o2_order = o2.opts.order.unwrap_or(default_order);
+            o1_order.cmp(&o2_order)
+        });
+
+        let header: Vec<_> = header_fd
+            .iter()
+            .map(|fd| format_title_with_dashed(fd.opts.title.clone().unwrap(), &fd.name))
             .collect();
         header
-        // quote!()
     }
+
+    fn generate_header_help_struct(&self) -> TokenStream {
+        let header_help = Ident::new(&format!("{}HeaderHelp", self.name), self.name.span());
+        let mut stream = TokenStream::new();
+        stream.extend(quote!(
+            #[derive(Debug)]
+            struct #header_help{
+                title: Option<String>,
+                title_key: Option<String>,
+                order: Option<u32>,
+                width: Option<u32>,
+            }
+        ));
+        stream
+    }
+
+    // const DEFAULT_ORDER: u32 = 99;
+    fn generate_header_help_data(&self) -> TokenStream {
+        let header_help_name = Ident::new(&format!("{}HeaderHelp", self.name), self.name.span());
+        let mut header_struct_data_stream = TokenStream::new();
+        header_struct_data_stream.extend(quote!(
+            let mut header_help_list = Vec::new();
+            // let mut header_help_map = HashMap::new();
+        ));
+        for fd in self.fields.iter() {
+            if fd.is_vec {
+                continue;
+            }
+            if let Some(title) = &fd.opts.title {
+                let title_key = format_title_with_dashed(title.clone(), &fd.name);
+                let order = fd.opts.order.unwrap_or(99);
+                let width = fd.opts.width.unwrap_or(0);
+                header_struct_data_stream.extend(quote!(
+                    header_help_list.push(
+                        #header_help_name {
+                            title: Some(#title.to_string()),
+                            title_key: Some(#title_key.to_string()),
+                            order: Some(#order),
+                            width: Some(#width),
+                        }
+                    );
+                ));
+            }
+        }
+        header_struct_data_stream.extend(quote!(
+            header_help_list.sort_by(|o1,o2|{
+                let o1_order = o1.order.unwrap();
+                let o2_order = o2.order.unwrap();
+                o1_order.cmp(&o2_order)
+            });
+            // println!("{:#?}", header_help_list);
+        ));
+        header_struct_data_stream
+    }
+}
+
+fn format_title_with_dashed(title: String, fd_name: &Ident) -> String {
+    format!("{}-{}", title, fd_name)
 }
 
 // 如果是 T = Option<Inner>，返回 (true, Inner)；否则返回 (false, T)
